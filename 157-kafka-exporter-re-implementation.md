@@ -25,14 +25,29 @@ We will create new repository under Strimzi organization - `strimzi/kafka-export
 ### Implementation
 
 Because Strimzi mostly consists of Java projects, the proposal is to implement the tool in Java.
-The implementation will use the minimal required dependencies and will contain all the existing features of the latest version of Kafka Exporter.
+The implementation will use the minimal required dependencies and will cover all functionality currently used by Strimzi.
+Features not used by Strimzi are explicitly out of scope for the initial implementation, including Helm charts, Kerberos authentication, and SASL mechanisms other than OAUTHBEARER.
 
 All the metrics that the tool will export will follow the same naming as the existing Kafka Exporter, but this can change in the future based on community feedback and needs.
 
 To keep the minimal dependency tree we will use the following:
 - `kafka-clients` for `AdminClient`
 - `prometheus-metrics-core` and `prometheus-metrics-exposition-formats` for Prometheus endpoint
-- JDK built-in http server for `/metrics` and `/healthz/ready` endpoints
+- JDK built-in HTTP server for the `/metrics` and health check endpoints
+
+#### HTTP Server
+
+The tool exposes two HTTP listeners on separate ports, following the same pattern used by the Kafka Bridge:
+
+- **Management port** (default: `9404`) — serves `/healthz/ready` over plain HTTP only.
+This port is never TLS-enabled and is used exclusively by the operator's liveness and readiness probes.
+Keeping health check endpoints on a dedicated plain-HTTP port means probe behaviour is stable regardless of the TLS configuration of the metrics endpoint.
+- **Metrics port** (default: `9403`) — serves `/metrics`.
+In the initial release this port also uses plain HTTP.
+
+Adding TLS support to the metrics port is tracked in [strimzi-kafka-operator#12556](https://github.com/strimzi/strimzi-kafka-operator/issues/12556) and is planned as a follow-up.
+When implemented, it will follow the same CRD pattern used by Kafka Bridge's `spec.http.tls` — a `tls` block under `spec.kafkaExporter` containing a `certificateAndKey` reference and an optional `trustedCertificates` list for mTLS.
+The two-port architecture ensures that enabling TLS on the metrics port will not require any changes to the probe configuration in the operator.
 
 ### CI/CD
 
@@ -42,8 +57,40 @@ As an output of the build and release process, we will produce a tarball with a 
 ### Versioning
 
 The tool will follow Strimzi versioning `<major>.<minor>.<micro>` as other projects do.
-The first version will be `0.1.0`, even though the tool already covers all existing Kafka Exporter functionality.
-We will keep the tool in the 0.x line for one or two releases to gather feedback and confirm parity with the Go implementation in production before releasing the `1.0.0`.
+The first version will be `0.1.0`, even though the tool already covers all Strimzi-required functionality.
+We will keep the tool in the 0.x line for two releases to gather feedback and validate the implementation covers all Strimzi use cases in production before releasing the `1.0.0`.
+
+### Strimzi Kafka Operator changes
+
+#### Feature Gate for Strimzi Kafka Operator
+
+The switch from the Go binary to the Java implementation will be gated behind a new feature gate — `KafkaExporterJavaImplementation` — to allow a safe, opt-in transition for users.
+
+The gate will progress through the standard Strimzi feature gate lifecycle:
+
+1. Introduced as **alpha** (disabled by default) - users can opt in to the new Java implementation while the Go binary remains the default.
+2. Promoted to **beta** (enabled by default) after two releases (in 1.4.0) once sufficient feedback and production validation has been gathered - users can still opt out by explicitly disabling the gate.
+3. Promoted to **GA** and the feature gate removed after four releases (in 1.6.0) - the Go binary is dropped and the Java implementation becomes the only option.
+
+When the feature gate is disabled, the operator continues to use the existing Go binary and `kafka_exporter_run.sh` launch script unchanged.
+When the feature gate is enabled, the operator copies the fat-jar artifact from the `strimzi/kafka-exporter` repository into the Kafka image and uses an updated launch script to start the Java implementation.
+
+#### CRD and API Changes
+
+Moving from a Go binary to a Java implementation requires normalising some fields in `KafkaExporterSpec` that are Go-specific.
+
+The following changes will be made to the `kafkaExporter` section of the Kafka CR:
+
+- `logging` — currently accepts Go-style log levels (`info`, `debug`, `trace`).
+  The existing field is kept and its value is mapped internally to the equivalent Java log level, so existing CRs continue to work without changes.
+- `enableSaramaLogging` — this field controls logging of the Sarama Go client library, which has no equivalent in the Java implementation.
+  The field will be deprecated and ignored when the Java implementation is active.
+  When the feature gate is enabled and this field is set, the operator will emit a warning in its log.
+- `jvmOptions` — a new field following the standard Strimzi `JvmOptions` type will be added to allow users to configure JVM heap, GC options, and other JVM flags, consistent with how other Java-based Strimzi components expose this.
+  This field is only meaningful when the Java implementation is active.
+  When the feature gate is disabled and this field is set, the operator will emit a warning in its log that `jvmOptions` is ignored by the Go binary.
+
+The deprecated Go-specific fields will be removed in a future API version once the feature gate reaches GA and the Go binary is fully retired.
 
 ### Documentation
 
@@ -52,27 +99,24 @@ The Strimzi documentation will be updated to reflect the switch from the upstrea
 
 ### Testing
 
-The new repository will include unit tests covering the metrics collection and registry logic, and integration tests running against a real Kafka instance.
+The new repository will include unit tests covering the metrics collection and registry logic, and integration tests running against a real Kafka instance using `strimzi-test-container`.
 Existing system tests in `strimzi-kafka-operator` will ensure that new implementation of Kafka Exporter continues to work end-to-end after the swap.
 No additional e2e scenarios will be needed.
 
 ### Security
 
-The new implementation will keep the same TLS and SASL/OAuth handling that Kafka Exporter has today, so the Kafka Exporter container keeps the same permissions and credential sources it already has, mounted certificates and Secrets provided by the Strimzi operator.
+The new implementation preserves the TLS/mTLS configuration used by Strimzi today. 
+The tool continues to use the cluster CA certificate and client certificate/key mounted by the operator via Secrets.
 No credentials will be logged or persisted by the tool itself.
-Moving to a Java implementation removes the current need to trust and verify pre-built third-party Go binaries and their checksums, replacing them with well known JVM dependencies that already go through Strimzi's existing CVE scanning and patching process.
-The AdminClient will only need the same read-level Kafka permissions the current tool requires today, describing topics and consumer groups, so no privilege changes are introduced.
+Moving to a Java implementation removes the current need to trust and verify pre-built third-party Go binaries and their checksums, replacing them with well-known JVM dependencies that already go through Strimzi's existing CVE scanning and patching process.
 
-Any security improvements will be added once we will create repo with initial implementation.
+SASL OAUTHBEARER support will be added as a follow-up when required by Cluster Security.
+Other SASL mechanisms are out of scope and will not be implemented.
 
 ## Affected Projects
 
 This proposal affects only `strimzi-kafka-operator` repo.
 Other sub-projects are not affected.
-
-In the operator repository, we will need to change the make targets to copy the new artifacts from the `strimzi/kafka-exporter` repository into the Kafka image.
-The existing `kafka_exporter_run.sh` script will be enhanced to launch the fat-jar instead of the Go binary with all necessary configs.
-The possibilities to configure Kafka Exporter through Kafka CR will remain the same as today.
 
 ## Backwards Compatibility
 
@@ -96,4 +140,4 @@ Kafka Exporter is a small tool and Go is great for such tools, however, we do no
 
 Quarkus provides an easy way to write small tools that expose Prometheus metrics.
 However, it also brings additional dependencies that can be easily avoided with pure Java.
-The main advantage of Quarkus for a tool like this would be native image builds, but since Strimzi images uses the JVM, there is no benefit in native images now.
+The main advantage of Quarkus for a tool like this would be native image builds, but native images are not viable for Strimzi because they only support x86-64 and aarch64, while Strimzi ships images for s390x and ppc64le as well.
