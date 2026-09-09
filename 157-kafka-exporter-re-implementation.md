@@ -10,17 +10,16 @@ The binaries are baked into Strimzi images and shipped as an optional tool for e
 ## Motivation
 
 The project is widely used by Kafka community, however, it is not well maintained.
-Latest release is from 2025-02-17 which makes it almost year and half old.
-This opens space for potential security issues as there are CVEs that are not fixed.
+The latest release, v1.10.0, was published on 2026-09-08 after a period of minimal activity, but the project still has 216 open issues and 56 open pull requests with limited attention from the code owner.
+This opens space for potential security issues as CVEs may not be fixed promptly.
 
-This situation is also not much helpful for new features that we would like to add into the exporter.
-Currently, there is 215 open issues and 58 open pull requests from the community with not much attention from the code owner.
+This situation is also not helpful for new features that we would like to add into the exporter.
 
 ## Proposal
 
 To mitigate security problems and allow us to better maintain the tool and provide new features, we should re-implement Kafka Exporter tool.
 
-We will create new repository under Strimzi organization - `strimzi/lag-reporter` - that will contain the implementation code.
+We will create new repository under Strimzi organization - `strimzi/insights-reporter` - that will contain the implementation code.
 
 ### Implementation
 
@@ -46,7 +45,7 @@ Keeping health check endpoints on a dedicated plain-HTTP port means probe behavi
 In the initial release this port also uses plain HTTP.
 
 There is community demand for having TLS enabled on metrics endpoint ([strimzi-kafka-operator#12556](https://github.com/strimzi/strimzi-kafka-operator/issues/12556)).
-The implementation and integration into Strimzi Kafka Operator will require new proposal as it will need API changes for the tool.
+The implementation and integration of TLS configuration into Strimzi Kafka Operator will require a new proposal as it will need API changes for the tool.
 
 ### CI/CD
 
@@ -60,50 +59,49 @@ The first version will be `0.1.0`, even though the tool already covers all Strim
 
 ### Strimzi Kafka Operator changes
 
-#### Feature Gate for Strimzi Kafka Operator
-
-The switch from the Go binary to the Java implementation will be gated behind a new feature gate — `StrimziLagReporter` — to allow a safe, opt-in transition for users.
-
-The gate will progress through the standard Strimzi feature gate lifecycle:
-
-1. Introduced as **alpha** (disabled by default) - users can opt in to the new Java implementation while the Go binary remains the default (introduced in 1.4.0).
-2. Promoted to **beta** (enabled by default) after two releases (in 1.6.0) once sufficient feedback and production validation has been gathered - users can still opt out by explicitly disabling the gate.
-3. Promoted to **GA** and the feature gate removed after four releases (in 1.8.0) - the Go binary is dropped and the Java implementation becomes the only option.
-
-When the feature gate is disabled, the operator continues to use the existing Go binary and `kafka_exporter_run.sh` launch script unchanged.
-When the feature gate is enabled, the operator will use Java binary baked in the Kafka image and `lag_reporter_run.sh` to launch the application.
-
 #### CRD and API Changes
 
-Moving from a Go binary to a Java implementation requires normalising some fields in `KafkaExporterSpec` that are Go-specific.
+Insights Reporter will be introduced as a new, parallel section in the Kafka CR — `spec.insightsReporter` — alongside the existing `spec.kafkaExporter` section.
+This allows users to opt in to the new Java implementation without any changes to their existing `kafkaExporter` configuration.
 
-The following changes will be made to the `kafkaExporter` section of the Kafka CR:
+The `spec.kafkaExporter` section will be set as **deprecated** from the moment `spec.insightsReporter` is introduced.
+The upstream `kafka_exporter` binary will be updated to v1.10.0 and continue to be supported and bundled in Strimzi images until new API version or until the tool will work without significant required changes on our side.
+The `spec.kafkaExporter` section and the Go binary will be removed in a future API version once the deprecation period ends.
 
-- `logging` — currently accepts Go-style log levels (`info`, `debug`, `trace`).
-  The existing field is kept and its value is mapped internally to the equivalent Java log level, so existing CRs continue to work without changes.
-- `enableSaramaLogging` — this field controls logging of the Sarama Go client library, which has no equivalent in the Java implementation.
-  The field will be deprecated and ignored when the Java implementation is active.
-  When the feature gate is enabled and this field is set, the operator will emit a warning in its log.
-- `jvmOptions` — a new field following the standard Strimzi `JvmOptions` type will be added to allow users to configure JVM heap, GC options, and other JVM flags, consistent with how other Java-based Strimzi components expose this.
-  This field is only meaningful when the Java implementation is active.
-  When the feature gate is disabled and this field is set, the operator will emit a warning in its log that `jvmOptions` is ignored by the Go binary.
+The new `spec.insightsReporter` section follows the same conventions as other Strimzi components such as CruiseControl.
+The component is enabled by including the section in the CR and disabled by omitting it — there is no separate `enabled` field, consistent with `spec.kafkaExporter` and `spec.cruiseControl`.
+The section will include the following fields from the start:
 
-The deprecated Go-specific fields will be removed in a future API version once the feature gate reaches GA and the Go binary is fully retired.
+- `image` — container image override.
+- `groupRegex` — consumer group include regex (default: `.*`).
+- `groupExcludeRegex` — consumer group exclude regex.
+- `topicRegex` — topic include regex (default: `.*`).
+- `topicExcludeRegex` — topic exclude regex.
+- `showAllOffsets` — whether to report offsets for all partitions the group has ever committed to (default: `true`).
+- `logging` — standard Strimzi `Logging` type (Log4j 2), replacing the plain string `logging` field from `kafkaExporter`.
+- `jvmOptions` — standard Strimzi `JvmOptions` type for JVM heap, GC options, and flags.
+- `resources` — CPU and memory resource requirements.
+- `livenessProbe` — liveness probe configuration.
+- `readinessProbe` — readiness probe configuration.
+- `template` — pod and container template overrides.
+
+Fields that exist in `kafkaExporter` but are Go-specific, such as `enableSaramaLogging`, will not be carried over to `spec.insightsReporter`.
+
+When both `spec.kafkaExporter` and `spec.insightsReporter` are set, the operator will emit a warning and use `spec.insightsReporter`, ignoring `spec.kafkaExporter`.
 
 ### Documentation
 
-The `strimzi/lag-reporter` repository will include a README covering all configuration options, the full list of exported metrics, and instructions for running the tool standalone.
-The Strimzi documentation will be updated to reflect the switch from the upstream Go binary to the new Java implementation.
+The `strimzi/insights-reporter` repository will include a README covering all configuration options, the full list of exported metrics, and instructions for running the tool standalone.
+The Strimzi documentation will be updated to reflect the new component and the deprecation of `spec.kafkaExporter`.
 
 ### Testing
 
 The new repository will include unit tests covering the metrics collection and registry logic, and integration tests running against a real Kafka instance using `strimzi-test-container`.
-Existing system tests in `strimzi-kafka-operator` will ensure that implementation of Lag Reporter continues to work end-to-end after the swap.
-No additional e2e scenarios will be needed.
+Existing system tests in `strimzi-kafka-operator` will be extended to cover Insights Reporter and will continue to cover the existing Kafka Exporter for the duration of the deprecation period.
 
 ### Security
 
-The new implementation preserves the TLS/mTLS configuration used by Strimzi today. 
+The new implementation preserves the TLS/mTLS configuration used by Strimzi today.
 The tool continues to use the cluster CA certificate and client certificate/key mounted by the operator via Secrets.
 No credentials will be logged or persisted by the tool itself.
 Moving to a Java implementation removes the current need to trust and verify pre-built third-party Go binaries and their checksums, replacing them with well-known JVM dependencies that already go through Strimzi's existing CVE scanning and patching process.
@@ -118,11 +116,17 @@ Other sub-projects are not affected.
 
 ## Backwards Compatibility
 
-This proposal is fully compatible with previous versions as new implementation will export all the same metrics as the original implementation.
-The tool will also follow the same environment variables and parameters that are used for configuration of current Kafka Exporter.
-Breaking removals of configuration options will only be possible in upcoming releases.
+Users who continue to use `spec.kafkaExporter` are not affected.
+The Go binary is kept at the latest upstream release (v1.10.0) and will continue to function until the deprecation period ends.
+Users who migrate to `spec.insightsReporter` will get the same metric names as today, so existing dashboards and alerting rules continue to work without modification.
 
 ## Rejected Alternatives
+
+### Feature gate transition
+
+An earlier version of this proposal used a feature gate to switch between the Go binary and the Java implementation within the existing `spec.kafkaExporter` API.
+This was rejected because it couples two unrelated implementations under the same API, complicates the operator logic for the duration of the gate lifecycle, and prevents a clean API that reflects the capabilities of the Java implementation.
+Introducing a new `spec.insightsReporter` section alongside a deprecated `spec.kafkaExporter` is a cleaner separation.
 
 ### Fork Kafka Exporter to Strimzi org
 
