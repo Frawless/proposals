@@ -46,6 +46,7 @@ In the initial release this port also uses plain HTTP.
 
 There is community demand for having TLS enabled on metrics endpoint ([strimzi-kafka-operator#12556](https://github.com/strimzi/strimzi-kafka-operator/issues/12556)).
 The implementation and integration of TLS configuration into Strimzi Kafka Operator will require a new proposal as it will need API changes for the tool.
+When TLS support is added, the implementation will use PEM files and Strimzi config providers, consistent with the approach used by other Strimzi components.
 
 ### CI/CD
 
@@ -65,7 +66,8 @@ Insights Reporter will be introduced as a new, parallel section in the Kafka CR 
 This allows users to opt in to the new Java implementation without any changes to their existing `kafkaExporter` configuration.
 
 The `spec.kafkaExporter` section will be set as **deprecated** from the moment `spec.insightsReporter` is introduced.
-The upstream `kafka_exporter` binary will be updated to v1.10.0 and continue to be supported and bundled in Strimzi images until new API version or until the tool will work without significant required changes on our side.
+The upstream `kafka_exporter` binary will be updated to v1.10.0 and continue to be supported and bundled in Strimzi images.
+We will keep to update Kafka Exporter until new API version or until the tool will work without significant required changes on our side.
 The `spec.kafkaExporter` section and the Go binary will be removed in a future API version once the deprecation period ends.
 
 The new `spec.insightsReporter` section follows the same conventions as other Strimzi components such as CruiseControl.
@@ -87,7 +89,9 @@ The section will include the following fields from the start:
 
 Fields that exist in `kafkaExporter` but are Go-specific, such as `enableSaramaLogging`, will not be carried over to `spec.insightsReporter`.
 
-When both `spec.kafkaExporter` and `spec.insightsReporter` are set, the operator will emit a warning and use `spec.insightsReporter`, ignoring `spec.kafkaExporter`.
+Both `spec.kafkaExporter` and `spec.insightsReporter` can be set at the same time.
+This allows users to run both implementations in parallel during migration — for example to compare metrics output or verify parity before switching over.
+When both are configured, the operator will deploy both components independently and emit a warning recommending migration to `spec.insightsReporter`.
 
 ### Documentation
 
@@ -101,12 +105,13 @@ Existing system tests in `strimzi-kafka-operator` will be extended to cover Insi
 
 ### Security
 
-The new implementation preserves the TLS/mTLS configuration used by Strimzi today.
-The tool continues to use the cluster CA certificate and client certificate/key mounted by the operator via Secrets.
+The new implementation preserves the TLS/mTLS configuration used by Strimzi today for connecting to Kafka.
+The tool continues to use the cluster CA certificate and client certificate/key mounted by the operator via Secrets, loaded via PEM files and Strimzi config providers.
 No credentials will be logged or persisted by the tool itself.
 Moving to a Java implementation removes the current need to trust and verify pre-built third-party Go binaries and their checksums, replacing them with well-known JVM dependencies that already go through Strimzi's existing CVE scanning and patching process.
 
-SASL OAUTHBEARER support will be added as a follow-up.
+SASL OAUTHBEARER support will be added as a near-term follow-up.
+It is required for Strimzi Cluster Security and is straightforward to implement by including Strimzi OAuth as a dependency and adding the relevant Kafka client configuration.
 Other SASL mechanisms are currently out of scope.
 
 ## Affected Projects
