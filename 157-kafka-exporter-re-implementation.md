@@ -14,6 +14,7 @@ The latest release, v1.10.0, was published on 2026-09-08 after a period of minim
 This opens space for potential security issues as CVEs may not be fixed promptly.
 
 This situation is also not helpful for new features that we would like to add into the exporter.
+Additionally, the upstream project relies on a third-party Go Kafka client rather than the official Apache Kafka client, meaning it does not benefit from the same level of support and compatibility guarantees that the official client provides.
 
 ## Proposal
 
@@ -33,6 +34,17 @@ To keep the minimal dependency tree we will use the following:
 - `kafka-clients` for `AdminClient`
 - `prometheus-metrics-core` and `prometheus-metrics-exposition-formats` for Prometheus endpoint
 - JDK built-in HTTP server for the `/metrics` and health check endpoints
+
+#### Collection Model
+
+Metrics collection is decoupled from the Prometheus scrape.
+A background scheduler runs a collection cycle on a configurable interval (default 30 seconds).
+Each cycle executes a sequence of batched `AdminClient` calls — cluster description, topic listing and description, offset fetching, consumer group listing, group description, and committed offset fetching — and assembles the results into an immutable snapshot.
+The snapshot is atomically swapped into the metrics registry.
+The `/metrics` endpoint only reads the latest snapshot; no Kafka calls happen in the scrape path and HTTP responses are always fast regardless of cluster size.
+
+On collection failure the previous snapshot continues to be served and the readiness probe reflects the unhealthy state.
+This avoids the `up == 0` failure mode seen in the upstream `kafka_exporter`, where scrapes time out under cluster load and dashboards go blind exactly when the cluster is most stressed.
 
 #### HTTP Server
 
@@ -79,7 +91,6 @@ The section will include the following fields from the start:
 - `groupExcludeRegex` — consumer group exclude regex.
 - `topicRegex` — topic include regex (default: `.*`).
 - `topicExcludeRegex` — topic exclude regex.
-- `showAllOffsets` — whether to report offsets for all partitions the group has ever committed to (default: `true`).
 - `logging` — standard Strimzi `Logging` type (Log4j 2), replacing the plain string `logging` field from `kafkaExporter`.
 - `jvmOptions` — standard Strimzi `JvmOptions` type for JVM heap, GC options, and flags.
 - `resources` — CPU and memory resource requirements.
@@ -110,14 +121,16 @@ The tool continues to use the cluster CA certificate and client certificate/key 
 No credentials will be logged or persisted by the tool itself.
 Moving to a Java implementation removes the current need to trust and verify pre-built third-party Go binaries and their checksums, replacing them with well-known JVM dependencies that already go through Strimzi's existing CVE scanning and patching process.
 
-SASL OAUTHBEARER support will be added as a near-term follow-up.
+SASL OAUTHBEARER support will be part of initial implementation.
 It is required for Strimzi Cluster Security and is straightforward to implement by including Strimzi OAuth as a dependency and adding the relevant Kafka client configuration.
 Other SASL mechanisms are currently out of scope.
 
 ## Affected Projects
 
-This proposal affects only `strimzi-kafka-operator` repo.
-Other sub-projects are not affected.
+This proposal affects the following projects:
+
+- `strimzi/insights-reporter` — new repository created by this proposal.
+- `strimzi-kafka-operator` — operator changes to introduce `spec.insightsReporter`, deprecate `spec.kafkaExporter`, and update system tests.
 
 ## Backwards Compatibility
 
