@@ -31,7 +31,7 @@ Features not used by Strimzi are explicitly out of scope for the initial impleme
 All the metrics that the tool will export will follow the same naming as the existing Kafka Exporter, but this can change in the future based on community feedback and needs.
 
 To keep the minimal dependency tree we will use the following:
-- `kafka-clients` for `AdminClient`
+- `kafka-clients` for `Admin`
 - `prometheus-metrics-core` and `prometheus-metrics-exposition-formats` for Prometheus endpoint
 - JDK built-in HTTP server for the `/metrics` and health check endpoints
 
@@ -39,7 +39,7 @@ To keep the minimal dependency tree we will use the following:
 
 Metrics collection is decoupled from the Prometheus scrape.
 A background scheduler runs a collection cycle on a configurable interval (default 30 seconds).
-Each cycle executes a sequence of batched `AdminClient` calls — cluster description, topic listing and description, offset fetching, consumer group listing, group description, and committed offset fetching — and assembles the results into an immutable snapshot.
+Each cycle executes a sequence of batched `Admin` calls — cluster description, topic listing and description, offset fetching, consumer group listing, group description, and committed offset fetching — and assembles the results into an immutable snapshot.
 The snapshot is atomically swapped into the metrics registry.
 The `/metrics` endpoint only reads the latest snapshot; no Kafka calls happen in the scrape path and HTTP responses are always fast regardless of cluster size.
 
