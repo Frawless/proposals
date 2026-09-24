@@ -74,7 +74,7 @@ The first version will be `0.1.0`, even though the tool already covers all Strim
 
 #### CRD and API Changes
 
-Sova will be introduced as a new, parallel section in the Kafka CR — `spec.extraMetrics` — alongside the existing `spec.kafkaExporter` section.
+Sova will be introduced as a new, parallel section in the Kafka CR `spec.extraMetrics` alongside the existing `spec.kafkaExporter` section.
 This allows users to opt in to the new Java implementation without any changes to their existing `kafkaExporter` configuration.
 
 The `spec.kafkaExporter` section will be set as **deprecated** from the moment `spec.extraMetrics` is introduced.
