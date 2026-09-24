@@ -74,7 +74,7 @@ The first version will be `0.1.0`, even though the tool already covers all Strim
 
 #### CRD and API Changes
 
-Insights Reporter will be introduced as a new, parallel section in the Kafka CR — `spec.extraMetrics` — alongside the existing `spec.kafkaExporter` section.
+Sova will be introduced as a new, parallel section in the Kafka CR — `spec.extraMetrics` — alongside the existing `spec.kafkaExporter` section.
 This allows users to opt in to the new Java implementation without any changes to their existing `kafkaExporter` configuration.
 
 The `spec.kafkaExporter` section will be set as **deprecated** from the moment `spec.extraMetrics` is introduced.
@@ -112,7 +112,7 @@ The Strimzi documentation will be updated to reflect the new component and the d
 ### Testing
 
 The new repository will include unit tests covering the metrics collection and registry logic, and integration tests running against a real Kafka instance using `strimzi-test-container`.
-Existing system tests in `strimzi-kafka-operator` will be extended to cover Insights Reporter and will continue to cover the existing Kafka Exporter for the duration of the deprecation period.
+Existing system tests in `strimzi-kafka-operator` will be extended to cover Sova and will continue to cover the existing Kafka Exporter for the duration of the deprecation period.
 
 ### Security
 
