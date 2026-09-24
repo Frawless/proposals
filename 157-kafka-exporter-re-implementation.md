@@ -20,7 +20,7 @@ Additionally, the upstream project relies on a third-party Go Kafka client rathe
 
 To mitigate security problems and allow us to better maintain the tool and provide new features, we should re-implement Kafka Exporter tool.
 
-We will create new repository under Strimzi organization - `strimzi/insights-reporter` - that will contain the implementation code.
+We will create new repository under Strimzi organization that will host source code of toll `Sova` - `strimzi/sova`.
 
 ### Implementation
 
@@ -74,15 +74,15 @@ The first version will be `0.1.0`, even though the tool already covers all Strim
 
 #### CRD and API Changes
 
-Insights Reporter will be introduced as a new, parallel section in the Kafka CR — `spec.insightsReporter` — alongside the existing `spec.kafkaExporter` section.
+Insights Reporter will be introduced as a new, parallel section in the Kafka CR — `spec.extraMetrics` — alongside the existing `spec.kafkaExporter` section.
 This allows users to opt in to the new Java implementation without any changes to their existing `kafkaExporter` configuration.
 
-The `spec.kafkaExporter` section will be set as **deprecated** from the moment `spec.insightsReporter` is introduced.
+The `spec.kafkaExporter` section will be set as **deprecated** from the moment `spec.extraMetrics` is introduced.
 The upstream `kafka_exporter` binary will be updated to v1.10.0 and continue to be supported and bundled in Strimzi images.
 We will keep to update Kafka Exporter until new API version or until the tool will work without significant required changes on our side.
 The `spec.kafkaExporter` section and the Go binary will be removed in a future API version once the deprecation period ends.
 
-The new `spec.insightsReporter` section follows the same conventions as other Strimzi components such as CruiseControl.
+The new `spec.extraMetrics` section follows the same conventions as other Strimzi components such as CruiseControl.
 The component is enabled by including the section in the CR and disabled by omitting it — there is no separate `enabled` field, consistent with `spec.kafkaExporter` and `spec.cruiseControl`.
 The section will include the following fields from the start:
 
@@ -98,15 +98,15 @@ The section will include the following fields from the start:
 - `readinessProbe` — readiness probe configuration.
 - `template` — pod and container template overrides.
 
-Fields that exist in `kafkaExporter` but are Go-specific, such as `enableSaramaLogging`, will not be carried over to `spec.insightsReporter`.
+Fields that exist in `kafkaExporter` but are Go-specific, such as `enableSaramaLogging`, will not be carried over to `spec.extraMetrics`.
 
-Both `spec.kafkaExporter` and `spec.insightsReporter` can be set at the same time.
+Both `spec.kafkaExporter` and `spec.extraMetrics` can be set at the same time.
 This allows users to run both implementations in parallel during migration — for example to compare metrics output or verify parity before switching over.
-When both are configured, the operator will deploy both components independently and emit a warning recommending migration to `spec.insightsReporter`.
+When both are configured, the operator will deploy both components independently and emit a warning recommending migration to `spec.extraMetrics`.
 
 ### Documentation
 
-The `strimzi/insights-reporter` repository will include a README covering all configuration options, the full list of exported metrics, and instructions for running the tool standalone.
+The `strimzi/sova` repository will include a README covering all configuration options, the full list of exported metrics, and instructions for running the tool standalone.
 The Strimzi documentation will be updated to reflect the new component and the deprecation of `spec.kafkaExporter`.
 
 ### Testing
@@ -129,14 +129,14 @@ Other SASL mechanisms are currently out of scope.
 
 This proposal affects the following projects:
 
-- `strimzi/insights-reporter` — new repository created by this proposal.
-- `strimzi-kafka-operator` — operator changes to introduce `spec.insightsReporter`, deprecate `spec.kafkaExporter`, and update system tests.
+- `strimzi/sova` — new repository created by this proposal.
+- `strimzi-kafka-operator` — operator changes to introduce `spec.extraMetrics`, deprecate `spec.kafkaExporter`, and update system tests.
 
 ## Backwards Compatibility
 
 Users who continue to use `spec.kafkaExporter` are not affected.
 The Go binary is kept at the latest upstream release (v1.10.0) and will continue to function until the deprecation period ends.
-Users who migrate to `spec.insightsReporter` will get the same metric names as today, so existing dashboards and alerting rules continue to work without modification.
+Users who migrate to `spec.extraMetrics` will get the same metric names as today, so existing dashboards and alerting rules continue to work without modification.
 
 ## Rejected Alternatives
 
@@ -144,7 +144,7 @@ Users who migrate to `spec.insightsReporter` will get the same metric names as t
 
 An earlier version of this proposal used a feature gate to switch between the Go binary and the Java implementation within the existing `spec.kafkaExporter` API.
 This was rejected because it couples two unrelated implementations under the same API, complicates the operator logic for the duration of the gate lifecycle, and prevents a clean API that reflects the capabilities of the Java implementation.
-Introducing a new `spec.insightsReporter` section alongside a deprecated `spec.kafkaExporter` is a cleaner separation.
+Introducing a new `spec.extraMetrics` section alongside a deprecated `spec.kafkaExporter` is a cleaner separation.
 
 ### Fork Kafka Exporter to Strimzi org
 
