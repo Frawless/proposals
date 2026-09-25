@@ -50,7 +50,7 @@ This avoids the `up == 0` failure mode seen in the upstream `kafka_exporter`, wh
 
 The tool exposes two HTTP listeners on separate ports, following the same pattern used by the Kafka Bridge:
 
-- **Management port** (default: `8080`) — serves `/healthz/ready` over plain HTTP only.
+- **Management port** (default: `8080`) — serves `/healthy` and `/ready` over plain HTTP.
 This port is never TLS-enabled and is used exclusively by the operator's liveness and readiness probes.
 Keeping health check endpoints on a dedicated plain-HTTP port means probe behaviour is stable regardless of the TLS configuration of the metrics endpoint.
 - **Metrics port** (default: `9404`) — serves `/metrics`.
